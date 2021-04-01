@@ -2,15 +2,19 @@ from collections import Counter
 from random import random
 from nltk import word_tokenize
 from torch import nn
+from torch.autograd import Variable
+import pandas as pd
+from torch.nn.utils.rnn import pad_sequence, pack_padded_sequence,pad_packed_sequence
 import json
 import re
 import numpy as np
 import torch
 import torch.nn.functional as F
 import os
-from doc_encoder import Encoder
+from transformer.EncoderForSumm import *
 from transformers import BertModel, BertConfig
-
+# from transformers import BertConfig
+# from bert_model import BertModel
 import math
 
 
@@ -170,6 +174,34 @@ class PositionalEncoding(nn.Module):
 		return self.pe[:, :emb.size(1)]
 
 
+class EDUExtractor(nn.Module):
+	def __init__(self,dim):
+		super(EDUExtractor, self).__init__()
+		self_attention = []
+		self_attention.append(nn.Linear(dim, dim))
+		self_attention.append(nn.ReLU())
+		self_attention.append(nn.Linear(dim, 1))
+		self.self_attention = nn.Sequential(*self_attention)
+		# for param in self.model.parameters():
+		# 	param.requires_grad = False
+
+	def forward(self, top_vec, edu_span,edu_mask):
+		# edu_span: batch * length * edu_num
+		# top_vec: batch * length * bert_embedding
+		# edu_mask: batch * edu_num
+
+		inv_edu_mask = 1-edu_mask.unsqueeze(1).expand(edu_span.size())
+		scores = self.self_attention(top_vec) #batch * length * 1
+
+		scores = scores * edu_span # batch * length * edu_num
+		inf_entrnace = ~((edu_span+inv_edu_mask).type(torch.bool))
+		scores.masked_fill_(inf_entrnace,float('-inf'))
+		edu_scores = torch.nn.functional.softmax(scores,dim=1)
+		# edu_scores[edu_scores!=edu_scores]=0
+		edu_representation = torch.bmm(edu_scores.permute(0,2,1),top_vec)
+		return edu_representation
+
+
 
     
 class DiscoExtSumm_dp(nn.Module):
@@ -181,13 +213,30 @@ class DiscoExtSumm_dp(nn.Module):
         bert_dir=args.bert_dir
         n_layers, n_head, d_k, d_v, d_inner,d_mlp=args.n_layers, args.n_head, args.d_k, args.d_v, args.d_inner,args.d_mlp
 
-
+        self.posemb ='sequential'
         self.PositionEncoder = PositionalEncoding(dropout, 768)	
+
+        self.tree_attn = False
+        self.bert_unit_encoder = True
         self.unit = unit
+
         self.bertsentencoder =BertSentEncoder(bert_dir, unit)
+
+#         self.RTransformer = RTransEncoder(n_layers, n_head, d_k, d_v,768, d_inner)
+        # self.balance_tree_seq = nn.Sequential(nn.Linear(768, 100),nn.ReLU(),nn.Linear(100, 1))
         self.Transformer = Encoder(n_layers, n_head, d_k, d_v,768, d_inner)
+        # self.Transformer = nn.TransformerEncoder(n_layers, n_head,)
         self.Dropoutlayer = nn.Dropout(p=dropout)
         self.Decoderlayer = self.build_decoder(768,d_mlp,dropout)
+
+    def self_attention(self,tree_embed,seq_embed):
+        tree_scoe = self.balance_tree_seq(tree_embed)
+        seq_scoe = self.balance_tree_seq(seq_embed)
+        scores = F.softmax(torch.cat([tree_scoe,seq_scoe],dim=2),dim=2)
+        attentive_embed = scores[:,:,0].unsqueeze(2)*tree_embed+scores[:,:,1].unsqueeze(2)*seq_embed
+        print(scores[0])
+        del tree_scoe,seq_scoe,scores
+        return attentive_embed
 
     def build_decoder(self,input_size,mlp_size,dropout,num_layers=1):
         decoder = []
@@ -203,14 +252,25 @@ class DiscoExtSumm_dp(nn.Module):
 
         ##### use bert as doc-encoder or sent encoder
         unit_repre = self.bertsentencoder(batch.src_list,batch.d_span_list,device)
+
+
+
+        #### position embedding
+
         pos_emb = self.PositionEncoder.pe[:, :unit_repre.size()[1]].expand(unit_repre.size()) #batch * edu_num * embedding_dim
         inputs = unit_repre+pos_emb
 
         out,attn = self.Transformer(inputs,batch.unit_mask,return_attns=True)
-
+        # print(len(attn))
+        # print(attn[0].shape)
         attn = [a.detach().cpu() for a in attn]
+        # del unit_repre
+#         out = self.RTransformer(inputs, batch.unit_mask, batch.hi_attn_map)
+        # print(batch.unit_mask)
+
+        # out = self.self_attention(out,unit_repre)
+#         out = unit_repre
         out = self.Dropoutlayer(out)
         # out = self.Dropoutlayer(out)
         out = self.Decoderlayer(out) # batch * length * 1
         return out,attn,unit_repre
-

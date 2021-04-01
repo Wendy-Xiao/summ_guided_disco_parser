@@ -20,7 +20,7 @@ def evaluate(model,dataloader,pos_weight,device, hyp_path, ref_path, \
         del attn, loss
         if i%10==0:
             print(i)
-    return all_ids,all_attns,
+    return all_ids,all_attns
 
 
 def evaluate_batch(model,batch, device):
