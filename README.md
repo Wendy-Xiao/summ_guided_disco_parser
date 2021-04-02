@@ -10,7 +10,7 @@ torch==1.6.0
 
 ## Usage
 ### 1. Dowload the Pre-trained Summarizer 
-The link to the models we used in this paper: [link]()
+The link to the models we used in this paper: [link](https://drive.google.com/drive/folders/1FhlEXqu_n-twV6f2vKd-qgIEkqkxHsaI?usp=sharing)
 
 You can also train your own summarizer by simply use the code [here](https://github.com/Wendy-Xiao/ext_summ_disco_tree_attn) by using self-attention as attention type.
 ### 2. Download the datasets
