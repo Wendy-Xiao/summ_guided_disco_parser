@@ -11,11 +11,12 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 import os
-from transformer.EncoderForSumm import *
+from doc_encoder import Encoder
 from transformers import BertModel, BertConfig
 # from transformers import BertConfig
 # from bert_model import BertModel
 import math
+
 
 
 
